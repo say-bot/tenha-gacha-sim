@@ -134,6 +134,19 @@ body{
 #spendbox .h{color:#ff9a7d;font-size:13px;letter-spacing:2px;margin-bottom:6px;}
 #spendbox .krw{font-size:26px;font-weight:800;color:var(--won);text-shadow:0 0 12px rgba(255,107,74,.35);}
 #spendbox .sub{font-size:12px;color:#c9b8a5;margin-top:4px;line-height:1.7;}
+/* 목표 시뮬 최고/최저 기록(우측, 과금액 아래) */
+#simrec{
+  position:absolute;right:28px;top:262px;z-index:5;min-width:220px;
+  background:linear-gradient(135deg,rgba(30,25,18,.85),rgba(20,16,12,.85));
+  border:1px solid rgba(232,196,118,.3);border-radius:6px;
+  padding:12px 18px;font-size:13px;line-height:2;
+}
+#simrec .h{color:var(--gold);font-weight:700;font-size:14px;letter-spacing:2px;margin-bottom:4px;
+  font-family:'Batang',serif;border-bottom:1px solid rgba(232,196,118,.25);padding-bottom:6px;}
+#simrec .row{display:flex;justify-content:space-between;gap:14px;}
+#simrec .row span:first-child{color:#9d937d;flex:none;}
+#simrec .row .v{color:#f5efdd;font-weight:600;text-align:right;}
+#simrec .row .v .amt{color:var(--won);}
 /* ============ 전환 연출 ============ */
 #transition{
   position:fixed;inset:0;z-index:50;display:none;pointer-events:none;
@@ -453,6 +466,7 @@ body{
   #leftbtns{position:static;left:auto;bottom:auto;justify-content:center;margin-top:16px;order:4;}
   .roundbtn{width:64px;height:64px;font-size:11px;}
   #stats{position:static;margin:14px 0 0;order:5;min-width:0;}
+  #simrec{position:static;inset:auto;margin:12px 0 0;order:5;min-width:0;}
   #collection{display:flex;position:static;inset:auto;width:auto;height:300px;margin:12px 0 0;order:6;}
   /* 결과 화면: 카드 3+2 랩 + 세로 스크롤 */
   #reveal{overflow-y:auto;overflow-x:hidden;justify-content:flex-start;padding:60px 10px 28px;gap:16px;}
@@ -522,6 +536,14 @@ body{
     <div class="h">누적 과금액</div>
     <div class="krw" id="bigWon">₩0</div>
     <div class="sub">옥벽 <b id="subJade">0</b>개 소모<br>149,000원 = 옥벽 8,480개 기준</div>
+  </div>
+
+  <div id="simrec">
+    <div class="h">🎯 목표 시뮬 기록</div>
+    <div class="row"><span>무장 최고</span><span class="v" id="srMuMax">-</span></div>
+    <div class="row"><span>무장 최저</span><span class="v" id="srMuMin">-</span></div>
+    <div class="row"><span>전법 최고</span><span class="v" id="srBpMax">-</span></div>
+    <div class="row"><span>전법 최저</span><span class="v" id="srBpMin">-</span></div>
   </div>
 
   <div id="calligraphy">
@@ -709,6 +731,7 @@ function load(){
     const v=JSON.parse(localStorage.getItem(KEY));
     if(v&&typeof v.gold==='number'){
       if(!v.owned) v.owned={};
+      if(!v.simRec) v.simRec={};
       if(typeof v.ord!=='number') v.ord=0;
       // 구버전 마이그레이션: 숫자 → {c:개수, o:획득순번}
       for(const k in v.owned){
@@ -717,7 +740,7 @@ function load(){
       return v;
     }
   }catch(e){}
-  return {gold:0,pulls:0,pity:0,coins:0,L:0,H:0,R:0,owned:{},ord:0};
+  return {gold:0,pulls:0,pity:0,coins:0,L:0,H:0,R:0,owned:{},ord:0,simRec:{}};
 }
 function save(){ localStorage.setItem(KEY,JSON.stringify(S)); }
 
@@ -871,7 +894,16 @@ function refreshMain(){
   const POOL_TOTAL=LG_GEN.length+LG_TAC.length+H_GEN.length+H_TAC.length+R_GEN.length+R_TAC.length;
   document.getElementById('sOwned').textContent = Object.keys(S.owned).length+'/'+POOL_TOTAL;
   document.getElementById('pityN').textContent = PITY_MAX-S.pity;
+  renderSimRec();
   renderCollection();
+}
+function renderSimRec(){
+  const fmt=r=>r ? r.n+' <span class="amt">₩'+comma(Math.round(r.g*KRW_PER_JADE))+'</span>' : '-';
+  const rec=S.simRec||{};
+  document.getElementById('srMuMax').innerHTML=fmt(rec.mu&&rec.mu.max);
+  document.getElementById('srMuMin').innerHTML=fmt(rec.mu&&rec.mu.min);
+  document.getElementById('srBpMax').innerHTML=fmt(rec.beop&&rec.beop.max);
+  document.getElementById('srBpMin').innerHTML=fmt(rec.beop&&rec.beop.min);
 }
 function renderCollection(){
   const list=Object.entries(S.owned)
@@ -890,7 +922,7 @@ function renderCollection(){
 }
 function resetAll(){
   if(!confirm('탐방 기록·누적 과금액·보유 도감을 모두 초기화할까요?')) return;
-  S={gold:0,pulls:0,pity:0,coins:0,L:0,H:0,R:0,owned:{},ord:0};
+  S={gold:0,pulls:0,pity:0,coins:0,L:0,H:0,R:0,owned:{},ord:0,simRec:{}};
   save(); refreshMain();
 }
 function openModal(){ document.getElementById('modalbg').classList.add('on'); }
@@ -898,6 +930,16 @@ function closeModal(){ document.getElementById('modalbg').classList.remove('on')
 
 /* ================= 목표 뽑기 시뮬레이션 ================= */
 let simTarget=null, simTimer=null;
+// 시뮬 성공 시 무장/전법별 최고·최저 비용 기록(실패/중단은 기록 안 함)
+function recordSimResult(type,name,gold){
+  const key = type==='무장' ? 'mu' : 'beop';
+  if(!S.simRec) S.simRec={};
+  const r = S.simRec[key] || {};
+  if(!r.max || gold>r.max.g) r.max={n:name,g:gold};
+  if(!r.min || gold<r.min.g) r.min={n:name,g:gold};
+  S.simRec[key]=r;
+  save(); renderSimRec();
+}
 function openSim(){ document.getElementById('simbg').classList.add('on'); simBack(); }
 function closeSim(){ clearInterval(simTimer); document.getElementById('simbg').classList.remove('on'); }
 function simBack(){
@@ -960,6 +1002,7 @@ function simStart(){
           if(name===simTarget){
             clearInterval(simTimer); paint();
             const gold=Math.ceil(n/5)*390;
+            recordSimResult(meta.t, simTarget, gold);
             document.getElementById('simResult').innerHTML =
               '<span class="big">'+simTarget+'</span> 획득!<br>'+
               '5회 탐방 <b>'+comma(Math.ceil(n/5))+'번</b> ('+comma(n)+'회) · 금화 <b>'+comma(gold)+'</b>'+
